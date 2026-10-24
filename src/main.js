@@ -254,9 +254,18 @@ async function deletePaperRecord(paperCode) {
 
 // Router
 function getCurrentRoute() {
-  const path = window.location.pathname.toLowerCase();
-  const hash = window.location.hash.toLowerCase();
-  if (path === '/admin' || path.startsWith('/admin') || hash === '#admin') {
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+  const hash = window.location.hash.toLowerCase().replace(/\/+$/, '');
+  const search = new URLSearchParams(window.location.search.toLowerCase());
+  
+  if (
+    path === '/admin' || 
+    path.startsWith('/admin') || 
+    hash === '#admin' || 
+    hash === '#/admin' ||
+    search.get('page') === 'admin' ||
+    search.has('admin')
+  ) {
     return 'admin';
   }
   return 'dashboard';
