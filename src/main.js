@@ -666,10 +666,14 @@ function renderDashboard() {
 function renderPapersListHTML() {
   return state.papers.map(p => {
     const details = getGradeDetails(p.total);
+    const isMcqOnly = p.hasEssay === false || p.essay === null || p.essay === undefined;
     return `
       <div class="paper-item">
         <div class="paper-meta">
-          <span class="paper-name">${p.code}</span>
+          <span class="paper-name" title="${p.code}">
+            ${p.code}
+            ${isMcqOnly ? '<span class="paper-meta-badge">MCQ Only</span>' : ''}
+          </span>
           <span class="paper-score" style="color: ${details.color};">${Number(p.total).toFixed(2)}%</span>
         </div>
         <div class="paper-progress-track">
@@ -687,7 +691,7 @@ function updateDashboardPapersView() {
   }
   if (paperMarksChartInstance) {
     paperMarksChartInstance.data.labels = state.papers.map(p => p.code);
-    paperMarksChartInstance.data.datasets[0].data = state.papers.map(p => p.essay);
+    paperMarksChartInstance.data.datasets[0].data = state.papers.map(p => (p.hasEssay === false || p.essay === null || p.essay === undefined) ? null : p.essay);
     paperMarksChartInstance.data.datasets[1].data = state.papers.map(p => p.mcq);
     paperMarksChartInstance.data.datasets[2].data = state.papers.map(p => p.total);
     paperMarksChartInstance.data.datasets.forEach(d => {
@@ -788,8 +792,15 @@ service cloud.firestore {
               <input type="number" step="0.01" min="0" max="100" id="admin-input-mcq" class="admin-form-input" placeholder="e.g. 35.00" required />
             </div>
 
-            <div class="admin-form-group">
-              <label class="admin-form-label">Essay Marks <span style="font-weight: normal; color: #64748b; font-size: 11.5px;">(Optional - MCQ පමණක් ඇත්නම් හිස්ව තබන්න)</span></label>
+            <div class="mcq-toggle-group" id="mcq-toggle-box">
+              <input type="checkbox" id="admin-check-mcq-only" />
+              <label for="admin-check-mcq-only" class="mcq-toggle-label">
+                <span>📝 MCQ පමණක් ඇතුලත් කරන්න (No Essay - MCQ Only Paper)</span>
+              </label>
+            </div>
+
+            <div class="admin-form-group" id="admin-group-essay">
+              <label class="admin-form-label">Essay Marks <span style="font-weight: normal; color: #64748b; font-size: 11.5px;">(Optional - MCQ පමණක් නම් ඉහත checkbox එක tick කරන්න)</span></label>
               <input type="number" step="0.01" min="0" max="100" id="admin-input-essay" class="admin-form-input" placeholder="Optional (e.g. 30.00)" />
             </div>
 
@@ -860,11 +871,12 @@ function renderAdminTableRows() {
   }
   return state.papers.map(p => {
     const details = getGradeDetails(p.total);
+    const isMcqOnly = p.hasEssay === false || p.essay === null || p.essay === undefined;
     return `
       <tr>
         <td><strong>${p.code}</strong></td>
         <td>${p.mcq}</td>
-        <td>${p.essay}</td>
+        <td>${isMcqOnly ? '<span class="badge-mcq-only">MCQ Only</span>' : p.essay}</td>
         <td><strong style="color: ${details.color};">${Number(p.total).toFixed(2)}%</strong></td>
         <td><span class="grade-badge-pill ${details.pillClass}">${details.label}</span></td>
         <td>
@@ -893,16 +905,40 @@ function setupAdminEvents() {
 
   const mcqInput = document.getElementById('admin-input-mcq');
   const essayInput = document.getElementById('admin-input-essay');
+  const checkMcqOnly = document.getElementById('admin-check-mcq-only');
+  const toggleBox = document.getElementById('mcq-toggle-box');
   const totalDisplay = document.getElementById('admin-preview-total');
   const gradeBadgeBox = document.getElementById('admin-preview-grade-badge');
 
   function calculatePreview() {
     const mcq = parseFloat(mcqInput.value) || 0;
-    const essay = essayInput.value.trim() !== '' ? (parseFloat(essayInput.value) || 0) : 0;
+    const isMcqOnly = checkMcqOnly ? checkMcqOnly.checked : false;
+    let essay = 0;
+    if (!isMcqOnly && essayInput.value.trim() !== '') {
+      essay = parseFloat(essayInput.value) || 0;
+    }
     const total = parseFloat((mcq + essay).toFixed(2));
     totalDisplay.textContent = `${total.toFixed(2)}%`;
     const details = getGradeDetails(total);
     gradeBadgeBox.innerHTML = `<span class="grade-badge-pill ${details.pillClass}">${details.label}</span>`;
+  }
+
+  if (checkMcqOnly) {
+    checkMcqOnly.addEventListener('change', () => {
+      if (checkMcqOnly.checked) {
+        if (toggleBox) toggleBox.classList.add('active');
+        essayInput.value = '';
+        essayInput.disabled = true;
+        essayInput.classList.add('essay-input-disabled');
+        essayInput.placeholder = 'N/A (MCQ Only Paper - No Essay)';
+      } else {
+        if (toggleBox) toggleBox.classList.remove('active');
+        essayInput.disabled = false;
+        essayInput.classList.remove('essay-input-disabled');
+        essayInput.placeholder = 'Optional (e.g. 30.00)';
+      }
+      calculatePreview();
+    });
   }
 
   mcqInput.addEventListener('input', calculatePreview);
@@ -913,14 +949,17 @@ function setupAdminEvents() {
     e.preventDefault();
     const code = document.getElementById('admin-input-paper-code').value.trim();
     const mcq = parseFloat(mcqInput.value) || 0;
-    const essay = essayInput.value.trim() !== '' ? (parseFloat(essayInput.value) || 0) : 0;
-    const total = parseFloat((mcq + essay).toFixed(2));
+    const isMcqOnly = checkMcqOnly ? checkMcqOnly.checked : false;
+    const hasEssayValue = !isMcqOnly && essayInput.value.trim() !== '';
+    const essay = hasEssayValue ? (parseFloat(essayInput.value) || 0) : null;
+    const total = parseFloat((mcq + (essay || 0)).toFixed(2));
     const details = getGradeDetails(total);
 
     const paperObj = {
       code,
       mcq,
       essay,
+      hasEssay: hasEssayValue,
       total,
       color: details.color,
       grade: details.grade
@@ -933,6 +972,13 @@ function setupAdminEvents() {
     document.getElementById('admin-input-paper-code').value = '';
     mcqInput.value = '';
     essayInput.value = '';
+    if (checkMcqOnly) {
+      checkMcqOnly.checked = false;
+      if (toggleBox) toggleBox.classList.remove('active');
+      essayInput.disabled = false;
+      essayInput.classList.remove('essay-input-disabled');
+      essayInput.placeholder = 'Optional (e.g. 30.00)';
+    }
     calculatePreview();
   });
 
@@ -1121,7 +1167,7 @@ function initPaperMarksChart() {
   if (!ctx) return;
 
   const labels = state.papers.map(p => p.code);
-  const essayData = state.papers.map(p => p.essay);
+  const essayData = state.papers.map(p => (p.hasEssay === false || p.essay === null || p.essay === undefined) ? null : p.essay);
   const mcqData = state.papers.map(p => p.mcq);
   const totalData = state.papers.map(p => p.total);
 
@@ -1133,6 +1179,7 @@ function initPaperMarksChart() {
         {
           label: 'Essay',
           data: essayData,
+          spanGaps: true,
           borderColor: '#f59e0b',
           backgroundColor: '#ffffff',
           pointBackgroundColor: '#ffffff',
@@ -1210,6 +1257,7 @@ function initPaperMarksChart() {
               const paperIndex = tooltipModel.dataPoints[0].dataIndex;
               const paper = state.papers[paperIndex];
               if (paper) {
+                const isMcqOnly = paper.hasEssay === false || paper.essay === null || paper.essay === undefined;
                 tooltipEl.innerHTML = `
                   <div class="tooltip-header">${paper.code}</div>
                   <div class="tooltip-list">
@@ -1229,7 +1277,7 @@ function initPaperMarksChart() {
                       <div class="tooltip-entry-left">
                         <span class="tooltip-dot dot-essay"></span> Essay
                       </div>
-                      <div class="tooltip-entry-val">${paper.essay}</div>
+                      <div class="tooltip-entry-val">${isMcqOnly ? '<span style="color:#94a3b8; font-size:12px;">MCQ Only</span>' : paper.essay}</div>
                     </div>
                   </div>
                 `;
